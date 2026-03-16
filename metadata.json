@@ -1,0 +1,7 @@
+{
+  "name": "Gestor administrativo da Força Tática 5ºBPM",
+  "description": "Uma plataforma inteligente para gestão de escalas de serviço da Polícia Militar, com auxílio de IA para distribuição equitativa de turnos e veículos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
