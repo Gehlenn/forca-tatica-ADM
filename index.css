@@ -1,0 +1,38 @@
+
+@media print {
+  body {
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  
+  .print\:hidden {
+    display: none !important;
+  }
+  
+  .container {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  /* Ensure colors are printed */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Avoid page breaks inside the roster */
+  table, tr, td, th {
+    page-break-inside: avoid !important;
+  }
+
+  /* Force landscape if needed, but usually browser handles it. 
+     We can suggest it in the UI. */
+}
+
+/* Base styles to ensure consistency if Tailwind CDN fails or for print */
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}

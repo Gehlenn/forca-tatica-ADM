@@ -63,6 +63,20 @@ const LogbookView: React.FC<Props> = ({ roster, officers, overrides, onOverride,
           <tbody>
             {officers.map((off, oIdx) => {
               const rows = ['SV', 'EA', 'IE', 'GSE', 'BH'];
+              
+              const rowTotals = rows.reduce((acc, type) => {
+                const total = daysArray.reduce((sum, d) => {
+                  const val = getDayValue(off, d, type);
+                  const num = parseInt(val);
+                  return sum + (isNaN(num) ? 0 : num);
+                }, 0);
+                acc[type] = total;
+                return acc;
+              }, {} as Record<string, number>);
+
+              const totalHs = rowTotals['SV'] + rowTotals['EA'] + rowTotals['IE'] + rowTotals['BH'];
+              const gseTotal = rowTotals['GSE'];
+
               return (
                 <React.Fragment key={off.id}>
                   {rows.map((type, rIdx) => (
@@ -93,11 +107,13 @@ const LogbookView: React.FC<Props> = ({ roster, officers, overrides, onOverride,
                           </td>
                         );
                       })}
+                      <td className="border border-black p-0 text-center font-black bg-slate-50">
+                        {rowTotals[type] || ''}
+                      </td>
                       {rIdx === 0 && (
                         <>
-                          <td rowSpan={5} className="border-2 border-black p-0 text-center font-black bg-slate-50">160</td>
-                          <td rowSpan={5} className="border-2 border-black p-0 text-center font-black bg-slate-50">196</td>
-                          <td rowSpan={5} className="border-2 border-black p-0 text-center font-black bg-slate-50">36</td>
+                          <td rowSpan={5} className="border-2 border-black p-0 text-center font-black bg-slate-50">{totalHs}</td>
+                          <td rowSpan={5} className="border-2 border-black p-0 text-center font-black bg-slate-50">{gseTotal}</td>
                         </>
                       )}
                     </tr>

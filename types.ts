@@ -25,7 +25,7 @@ export interface ShiftEntry {
   vtr?: string;
   timeRange?: string;
   officers: string[]; 
-  type: 'SERVICO' | 'FOLGA' | 'TREINAMENTO' | 'EXPEDIENTE';
+  type: string; // Text based type (e.g., "TREINAMENTO", "EXPEDIENTE")
   mission?: string;
 }
 
@@ -33,7 +33,7 @@ export interface DayColumn {
   date: string;
   weekday: string;
   shifts: {
-    [key: string]: ShiftEntry;
+    [key: string]: ShiftEntry[];
   };
 }
 
@@ -79,6 +79,7 @@ export interface GseJustifyEntry {
   he: string;
   turno: string;
   funcao: string;
+  mission?: string;
 }
 
 export interface DocumentMeta {

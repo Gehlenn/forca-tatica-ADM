@@ -1,10 +1,10 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { Officer, RosterState, GseEntry, GseJustifyEntry } from "../types";
+import { Officer, RosterState } from "../types";
 
 export async function suggestRosterFixes(roster: RosterState, officers: Officer[]) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const modelName = 'gemini-3-pro-preview';
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  const modelName = 'gemini-3-flash-preview';
   
   const prompt = `
     Analise a escala da Força Tática (PM). 
@@ -32,9 +32,9 @@ export async function suggestRosterFixes(roster: RosterState, officers: Officer[
   }
 }
 
-export async function analyzeScaleImage(base64Image: string, officers: Officer[], type: 'ROSTER' | 'LOGBOOK' | 'GSE_SCALE' | 'GSE_JUSTIFY' = 'ROSTER', mimeType: string = 'image/png') {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const modelName = 'gemini-2.5-flash-image';
+export async function analyzeScaleImage(base64Data: string, officers: Officer[], type: 'ROSTER' | 'LOGBOOK' | 'GSE_SCALE' | 'GSE_JUSTIFY' = 'ROSTER', mimeType: string = 'image/png') {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  const modelName = 'gemini-3-flash-preview';
 
   let specificInstruction = "";
   if (type === 'GSE_SCALE') {
@@ -48,10 +48,12 @@ export async function analyzeScaleImage(base64Image: string, officers: Officer[]
   }
 
   const prompt = `
+    Você é um especialista em OCR e digitalização de documentos militares da Brigada Militar.
     Instrução: ${specificInstruction}
     Lista de Policiais conhecidos (ID | NOME): ${officers.map(o => `${o.id}|${o.name}`).join(', ')}.
     O Mês deve ser retornado em maiúsculo (ex: JANEIRO, FEVEREIRO).
     Retorne APENAS o JSON puro. Não use markdown.
+    Seja extremamente preciso com os nomes e datas.
   `;
 
   try {
@@ -59,14 +61,13 @@ export async function analyzeScaleImage(base64Image: string, officers: Officer[]
       model: modelName,
       contents: {
         parts: [
-          { inlineData: { data: base64Image, mimeType: mimeType } },
+          { inlineData: { data: base64Data, mimeType: mimeType } },
           { text: prompt }
         ]
       }
     });
     
     const text = response.text?.trim() || "";
-    // Remove possíveis blocos de código markdown caso a IA ignore o sistema de instrução
     const cleanJson = text.replace(/^```json\s*/, "").replace(/```$/, "").trim();
     return cleanJson ? JSON.parse(cleanJson) : null;
   } catch (error) {

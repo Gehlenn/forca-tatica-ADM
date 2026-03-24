@@ -6,10 +6,11 @@ import { STATUS_LABELS } from '../constants';
 interface Props {
   officer: Officer;
   onSave: (officer: Officer) => void;
+  onDelete?: (id: string) => void;
   onClose: () => void;
 }
 
-const OfficerModal: React.FC<Props> = ({ officer, onSave, onClose }) => {
+const OfficerModal: React.FC<Props> = ({ officer, onSave, onDelete, onClose }) => {
   const [edited, setEdited] = useState<Officer>({ ...officer });
   const [fullMonth, setFullMonth] = useState(!officer.statusStart);
 
@@ -156,6 +157,18 @@ const OfficerModal: React.FC<Props> = ({ officer, onSave, onClose }) => {
         </div>
 
         <div className="p-4 bg-slate-100 flex gap-2 border-t-2 border-black">
+          {onDelete && (
+            <button 
+              onClick={() => {
+                if (window.confirm('Tem certeza que deseja excluir este militar?')) {
+                  onDelete(officer.id);
+                }
+              }} 
+              className="px-4 py-3 text-xs font-black bg-red-600 text-white uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] hover:bg-red-700 transition-all"
+            >
+              Excluir
+            </button>
+          )}
           <button onClick={onClose} className="flex-1 py-3 text-xs font-black text-slate-500 hover:bg-slate-200 uppercase border-2 border-transparent">Cancelar</button>
           <button 
             onClick={() => onSave(edited)} 

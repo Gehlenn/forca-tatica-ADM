@@ -40,13 +40,13 @@ const ImportModal: React.FC<Props> = ({ officersList, onImport, onClose }) => {
           .filter(o => namesArray.some(name => o.name.toLowerCase().includes(name)))
           .map(o => o.id);
 
-        tempDays[date].shifts[shiftKey] = {
+        tempDays[date].shifts[shiftKey] = [{
           id: Math.random().toString(),
           vtr: vtr || '',
           timeRange: '', // Padrão será preenchido depois
           officers: foundOfficerIds,
           type: 'SERVICO'
-        };
+        }];
       });
 
       const finalDays = Object.values(tempDays);

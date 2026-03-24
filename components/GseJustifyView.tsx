@@ -40,6 +40,7 @@ const GseJustifyView: React.FC<Props> = ({ month, officers, entries, onUpdate, m
             <th className="border border-black w-12">HE</th>
             <th className="border border-black w-16">Turno</th>
             <th className="border border-black w-24">Função</th>
+            <th className="border border-black">Missão</th>
           </tr>
         </thead>
         <tbody>
@@ -60,6 +61,9 @@ const GseJustifyView: React.FC<Props> = ({ month, officers, entries, onUpdate, m
                 <td className="border border-black text-center font-bold">{row.he}</td>
                 <td className="border border-black text-center">{row.turno}</td>
                 <td className="border border-black text-center font-bold">{row.funcao}</td>
+                <td className="border border-black text-center font-bold uppercase text-[8px]">
+                  <textarea readOnly={!isEditing} rows={1} className="w-full bg-transparent text-center resize-none outline-none" value={row.mission} onChange={e => updateEntry(row.id, 'mission', e.target.value)} />
+                </td>
               </tr>
             );
           })}

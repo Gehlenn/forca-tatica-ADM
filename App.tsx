@@ -8,31 +8,22 @@ import ConfigModal from './components/ConfigModal';
 import LogbookView from './components/LogbookView';
 import GseScaleView from './components/GseScaleView';
 import GseJustifyView from './components/GseJustifyView';
+import AiAssistant from './components/AiAssistant';
 import { INITIAL_OFFICERS, INITIAL_SHIFT_DEFINITIONS, STATUS_LABELS, MONTHS_OF_YEAR } from './constants';
 import { Officer, RosterState, AppTab, GseEntry, GseJustifyEntry, DocumentMeta, DayColumn, ConfigState, ShiftRowDefinition, ShiftEntry } from './types';
 import { analyzeScaleImage } from './services/geminiService';
+import { api } from './src/api';
 
 const isWeekend = (weekday: string) => weekday.toLowerCase() === 'sábado' || weekday.toLowerCase() === 'domingo';
 
 const App: React.FC = () => {
-  const [officers, setOfficers] = useState<Officer[]>(() => {
-    const saved = localStorage.getItem('pm_officers');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.map((o: Officer) => {
-        const initial = INITIAL_OFFICERS.find(io => io.id === o.id);
-        if (initial) {
-          return { ...o, rank: initial.rank, fullName: initial.fullName, idFunc: initial.idFunc, credor: initial.credor, cpf: initial.cpf };
-        }
-        return o;
-      });
-    }
-    return INITIAL_OFFICERS;
-  });
-  const [rosters, setRosters] = useState<Record<string, RosterState>>(() => {
-    const saved = localStorage.getItem('pm_rosters');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [officers, setOfficers] = useState<Officer[]>(INITIAL_OFFICERS);
+  const [rosters, setRosters] = useState<Record<string, RosterState>>({});
   const [roster, setRoster] = useState<RosterState | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('ESCALA');
   const [selectedMonth, setSelectedMonth] = useState('FEVEREIRO');
@@ -42,63 +33,175 @@ const App: React.FC = () => {
   const [isEditingScale, setIsEditingScale] = useState(false);
   const [isEditingStaff, setIsEditingStaff] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [config, setConfig] = useState<ConfigState>(() => {
-    const saved = localStorage.getItem('pm_config');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          return {
-            showVtr: parsed.showVtr ?? true,
-            showTime: parsed.showTime ?? true,
-            showMission: parsed.showMission ?? true,
-            showRank: parsed.showRank ?? true,
-          };
-        }
-      } catch (e) {
-        console.error("Error parsing config", e);
-      }
-    }
-    return { showVtr: true, showTime: true, showMission: true, showRank: true };
-  });
+  const [config, setConfig] = useState<ConfigState>({ showVtr: true, showTime: true, showMission: true, showRank: true });
   const [showConfig, setShowConfig] = useState(false);
 
-  const [gseEntries, setGseEntries] = useState<GseEntry[]>(() => {
-    const saved = localStorage.getItem('pm_gse_entries');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [justifyEntries, setJustifyEntries] = useState<GseJustifyEntry[]>(() => {
-    const saved = localStorage.getItem('pm_justify_entries');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [logOverrides, setLogOverrides] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('pm_log_overrides');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [gseEntries, setGseEntries] = useState<GseEntry[]>([]);
+  const [justifyEntries, setJustifyEntries] = useState<GseJustifyEntry[]>([]);
+  const [logOverrides, setLogOverrides] = useState<Record<string, string>>({});
+  const isSavingRef = useRef(false);
 
+  // Auth Mock (since we moved away from Firebase)
   useEffect(() => {
-    localStorage.setItem('pm_officers', JSON.stringify(officers));
-  }, [officers]);
+    const savedUser = localStorage.getItem('gestor_user');
+    if (savedUser) setUser(JSON.parse(savedUser));
+    setIsAuthReady(true);
+  }, []);
 
+  // API Sync
   useEffect(() => {
-    localStorage.setItem('pm_config', JSON.stringify(config));
-  }, [config]);
+    if (!user) return;
 
-  useEffect(() => {
-    localStorage.setItem('pm_gse_entries', JSON.stringify(gseEntries));
-  }, [gseEntries]);
+    const fetchData = async () => {
+      if (isSavingRef.current) return;
+      try {
+        const offData = await api.get('officers');
+        if (Array.isArray(offData) && offData.length > 0) {
+          // Sort by order_index just in case
+          const sorted = [...offData].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+          setOfficers(sorted);
+        } else if (Array.isArray(offData)) {
+          // Initialize with defaults if empty, preserving order
+          for (let i = 0; i < INITIAL_OFFICERS.length; i++) {
+            const off = { ...INITIAL_OFFICERS[i], order_index: i };
+            await api.post('officers', off);
+          }
+          const initialized = INITIAL_OFFICERS.map((o, i) => ({ ...o, order_index: i }));
+          setOfficers(initialized);
+        }
 
-  useEffect(() => {
-    localStorage.setItem('pm_justify_entries', JSON.stringify(justifyEntries));
-  }, [justifyEntries]);
+        const rosterData = await api.get('rosters');
+        const rosterMap: Record<string, RosterState> = {};
+        if (Array.isArray(rosterData)) {
+          rosterData.forEach((r: any) => { if (r && r.id) rosterMap[r.id] = r; });
+        }
+        setRosters(rosterMap);
 
-  useEffect(() => {
-    localStorage.setItem('pm_rosters', JSON.stringify(rosters));
-  }, [rosters]);
+        const configData = await api.get('config');
+        if (Array.isArray(configData) && configData.length > 0) setConfig(configData[0]);
 
-  useEffect(() => {
-    localStorage.setItem('pm_log_overrides', JSON.stringify(logOverrides));
-  }, [logOverrides]);
+        const overrideData = await api.get('log_overrides');
+        const overrideMap: Record<string, string> = {};
+        if (Array.isArray(overrideData)) {
+          overrideData.forEach((o: any) => { if (o && o.id) overrideMap[o.id] = o.val; });
+        }
+        setLogOverrides(overrideMap);
+
+        const gseData = await api.get('gse_entries');
+        if (Array.isArray(gseData)) setGseEntries(gseData);
+
+        const justifyData = await api.get('justify_entries');
+        if (Array.isArray(justifyData)) setJustifyEntries(justifyData);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+      }
+    };
+
+    fetchData();
+    // In a real app, we'd use WebSockets or polling for "real-time"
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Persist Changes to API
+  const saveOfficer = async (off: Officer) => {
+    isSavingRef.current = true;
+    try {
+      // Ensure we keep the order_index
+      const existing = officers.find(o => o.id === off.id);
+      const toSave = { ...off, order_index: existing?.order_index ?? officers.length };
+      await api.post('officers', toSave);
+      setOfficers(prev => prev.map(o => o.id === off.id ? toSave : o));
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const addOfficer = async (off: Officer) => {
+    isSavingRef.current = true;
+    try {
+      const toSave = { ...off, order_index: officers.length };
+      await api.post('officers', toSave);
+      setOfficers(prev => [...prev, toSave]);
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const deleteOfficer = async (id: string) => {
+    isSavingRef.current = true;
+    try {
+      await api.delete('officers', id);
+      setOfficers(prev => prev.filter(o => o.id !== id));
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const saveRoster = async (r: RosterState) => {
+    isSavingRef.current = true;
+    try {
+      await api.post('rosters', r);
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const saveConfig = async (c: ConfigState) => {
+    isSavingRef.current = true;
+    try {
+      await api.post('config', { ...c, id: 'main' });
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const saveOverride = async (key: string, val: string) => {
+    isSavingRef.current = true;
+    try {
+      await api.post('log_overrides', { id: key, val });
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const saveGseEntries = async (entries: GseEntry[]) => {
+    isSavingRef.current = true;
+    try {
+      for (const entry of entries) {
+        await api.post('gse_entries', entry);
+      }
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
+
+  const saveJustifyEntries = async (entries: GseJustifyEntry[]) => {
+    isSavingRef.current = true;
+    try {
+      for (const entry of entries) {
+        await api.post('justify_entries', entry);
+      }
+      setTimeout(() => { isSavingRef.current = false; }, 2000);
+    } catch (err) { 
+      console.error(err); 
+      isSavingRef.current = false;
+    }
+  };
 
   const filteredOfficers = useMemo(() => {
     return officers.filter(o => 
@@ -109,9 +212,12 @@ const App: React.FC = () => {
 
   const handleSaveConfig = (newDefs: ShiftRowDefinition[], newConfig: ConfigState) => {
     if (roster) {
-      setRoster({ ...roster, shiftDefinitions: newDefs });
+      const updatedRoster = { ...roster, shiftDefinitions: newDefs };
+      setRoster(updatedRoster);
+      saveRoster(updatedRoster);
     }
     setConfig(newConfig);
+    saveConfig(newConfig);
     setShowConfig(false);
   };
 
@@ -124,55 +230,207 @@ const App: React.FC = () => {
       const type = rowId === 'BH' ? 'BH' : (entry.type === 'SERVICO' ? 'SV' : 'EA');
       const key = `${offId}-${dayNum}-${type}`;
       const val = rowId === 'BH' ? '2' : (entry.timeRange?.includes('06') ? '06' : '12');
-      
-      setLogOverrides(prev => ({ ...prev, [key]: val }));
+      saveOverride(key, val);
+
+      // If it's a GSE shift, also set GSE row in logbook
+      if (entry.vtr === 'GSE' || rowId === 'GSE') {
+        saveOverride(`${offId}-${dayNum}-GSE`, '12');
+      }
     });
   };
 
-  const updateShift = (dayIdx: number, rowId: string, entry: ShiftEntry) => {
+  const getTurnosForTimeRange = (timeRange: string): string[] => {
+    const match = timeRange.match(/(\d+)h\s+às\s+(\d+)h/i);
+    if (!match) return [];
+    
+    let start = parseInt(match[1]);
+    let end = parseInt(match[2]);
+    
+    if (end <= start) end += 24; // Handle overnight
+    
+    const turnos = [
+      { id: '1T', start: 0, end: 6 },
+      { id: '2T', start: 6, end: 12 },
+      { id: '3T', start: 12, end: 18 },
+      { id: '4T', start: 18, end: 24 },
+      { id: '1T_NEXT', start: 24, end: 30 }, // Next day dawn
+    ];
+    
+    const result: string[] = [];
+    const overlaps: { id: string, overlap: number }[] = [];
+
+    turnos.forEach(t => {
+      const overlapStart = Math.max(start, t.start);
+      const overlapEnd = Math.min(end, t.end);
+      const overlap = Math.max(0, overlapEnd - overlapStart);
+      if (overlap > 0) {
+        overlaps.push({ id: t.id.replace('_NEXT', ''), overlap });
+      }
+    });
+
+    overlaps.forEach((o, index) => {
+      if (o.overlap > 3) {
+        result.push(o.id);
+      } else if (o.overlap === 3) {
+        // Preference for the last one if it's a tie or if it's the only one
+        if (index === overlaps.length - 1 || overlaps.length === 1) {
+          result.push(o.id);
+        }
+      }
+    });
+
+    return Array.from(new Set(result));
+  };
+
+  const updateShift = (dayIdx: number, rowId: string, entry: ShiftEntry, originalEntryId?: string) => {
     if (!roster) return;
     const newDays = [...roster.days];
-    newDays[dayIdx].shifts[rowId] = entry;
+    
+    // 1. Remove original entry from ALL rows of this day
+    if (originalEntryId) {
+      const shifts = newDays[dayIdx].shifts || {};
+      Object.keys(shifts).forEach(rid => {
+        if (shifts[rid]) {
+          shifts[rid] = shifts[rid].filter(e => e.id !== originalEntryId);
+        }
+      });
+      newDays[dayIdx].shifts = shifts;
+    }
+
+    // 2. Determine target rows based on timeRange
+    let targetRowIds: string[] = [rowId];
+    if (entry.timeRange && entry.timeRange.includes(' às ')) {
+      const autoTurnos = getTurnosForTimeRange(entry.timeRange);
+      if (autoTurnos.length > 0) {
+        targetRowIds = autoTurnos;
+      }
+    }
+
+    // 3. Auto-move to EXP row if type is EXPEDIENTE
+    if (entry.type === 'EXPEDIENTE') {
+      targetRowIds = ['EXP'];
+    }
+
+    // 4. Add/Update entry in target rows
+    targetRowIds.forEach(trid => {
+      if (!newDays[dayIdx].shifts[trid]) newDays[dayIdx].shifts[trid] = [];
+      newDays[dayIdx].shifts[trid].push(entry);
+    });
+
     const updatedRoster = { ...roster, days: newDays };
     setRoster(updatedRoster);
-    setRosters(prev => ({ ...prev, [updatedRoster.id]: updatedRoster }));
-    syncRosterToLog(dayIdx, rowId, entry);
+    saveRoster(updatedRoster);
+    syncRosterToLog(dayIdx, rowId, entry); // Note: rowId here might be slightly off if auto-assigned, but syncRosterToLog handles it
     setEditingCell(null);
   };
 
-  const handleLogOverride = (key: string, val: string) => {
-    setLogOverrides(prev => ({ ...prev, [key]: val }));
-    
+  const duplicateShift = (dayIdx: number, rowId: string, entry: ShiftEntry) => {
     if (!roster) return;
+    
+    let nextDayIdx = dayIdx;
+    let nextRowId = '';
+    
+    const rowIdx = roster.shiftDefinitions.findIndex(d => d.id === rowId);
+    if (rowIdx < roster.shiftDefinitions.length - 1) {
+      nextRowId = roster.shiftDefinitions[rowIdx + 1].id;
+    } else {
+      nextDayIdx = dayIdx + 1;
+      if (nextDayIdx < roster.days.length) {
+        nextRowId = roster.shiftDefinitions[0].id;
+      }
+    }
+    
+    if (nextRowId && nextDayIdx < roster.days.length) {
+      const newEntry = { ...entry, id: Math.random().toString() };
+      updateShift(nextDayIdx, nextRowId, newEntry);
+      alert(`Turno duplicado para ${roster.days[nextDayIdx].weekday} (${roster.days[nextDayIdx].date}) - ${nextRowId}`);
+    } else {
+      alert("Não há próximo turno disponível nesta escala.");
+    }
+  };
+
+  const handleLogOverride = (key: string, val: string) => {
+    saveOverride(key, val);
+    
     const [offId, dayStr, type] = key.split('-');
     const dayNum = parseInt(dayStr);
 
-    const dayIdx = roster.days.findIndex(d => parseInt(d.date.split('/')[0]) === dayNum);
+    // Find which week this day belongs to
+    const monthIndex = MONTHS_OF_YEAR.indexOf(selectedMonth);
+    let firstFriday = 1;
+    while (new Date(Number(selectedYear), monthIndex, firstFriday).getDay() !== 5) {
+      firstFriday++;
+    }
+    
+    let week = 1;
+    if (dayNum >= firstFriday) {
+      week = Math.floor((dayNum - firstFriday) / 7) + 1;
+    }
+    const targetRosterId = `r-${selectedMonth}-${week}`;
+
+    let targetRoster = rosters[targetRosterId];
+    
+    if (!targetRoster) {
+      // Initialize a basic roster for that week if it doesn't exist
+      const monthIndex = MONTHS_OF_YEAR.indexOf(selectedMonth);
+      let firstFriday = 1;
+      while (new Date(Number(selectedYear), monthIndex, firstFriday).getDay() !== 5) {
+        firstFriday++;
+      }
+      const startDay = firstFriday + (week - 1) * 7;
+      const weekdays = ['sexta-feira', 'sábado', 'domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira'];
+      const dates = weekdays.map((weekday, i) => {
+        const d = new Date(Number(selectedYear), monthIndex, startDay + i);
+        const dayNum = d.getDate().toString().padStart(2, '0');
+        const monthNum = (d.getMonth() + 1).toString().padStart(2, '0');
+        return { date: `${dayNum}/${monthNum}/2026`, weekday };
+      });
+
+      targetRoster = {
+        id: targetRosterId,
+        title: 'ESCALA SEMANAL DE SERVIÇO',
+        startDate: dates[0].date,
+        endDate: dates[6].date,
+        days: dates.map(d => ({ ...d, shifts: {} })),
+        observations: "NADA CONSTA.",
+        shiftDefinitions: INITIAL_SHIFT_DEFINITIONS
+      };
+    }
+
+    const newDays = [...targetRoster.days];
+    const dayIdx = newDays.findIndex(d => parseInt(d.date.split('/')[0]) === dayNum);
     if (dayIdx === -1) return;
 
-    const newDays = [...roster.days];
-    const day = newDays[dayIdx];
-
+    const day = { ...newDays[dayIdx], shifts: { ...newDays[dayIdx].shifts } };
     let rowId = '';
     if (type === 'BH') rowId = 'BH';
-    else if (type === 'SV') rowId = roster.shiftDefinitions[0]?.id || '1';
+    else if (type === 'SV') rowId = targetRoster.shiftDefinitions[0]?.id || '1';
     else if (type === 'EA') rowId = 'EA';
     else if (type === 'GSE') rowId = 'GSE';
     
     if (!rowId) return;
 
     if (!day.shifts[rowId]) {
-      day.shifts[rowId] = { id: Math.random().toString(), officers: [], type: 'SERVICO' };
+      day.shifts[rowId] = [];
     }
 
-    const shift = day.shifts[rowId];
+    // Find if this officer is already in a shift in this row
+    let shift = day.shifts[rowId].find(s => s.officers.includes(offId));
     
     if (val === '' || val === 'FG') {
-      shift.officers = shift.officers.filter(id => id !== offId);
-    } else {
-      if (!shift.officers.includes(offId)) {
-        shift.officers.push(offId);
+      if (shift) {
+        shift.officers = shift.officers.filter(id => id !== offId);
+        // If shift becomes empty, remove it? Maybe not, keep it for now or remove if it was the only one
+        if (shift.officers.length === 0) {
+          day.shifts[rowId] = day.shifts[rowId].filter(s => s.id !== shift!.id);
+        }
       }
+    } else {
+      if (!shift) {
+        shift = { id: Math.random().toString(), officers: [offId], type: 'SERVICO' };
+        day.shifts[rowId].push(shift);
+      }
+      
       if (val === '12') shift.timeRange = '06h às 18h';
       else if (val === '06') shift.timeRange = '06h às 12h';
       
@@ -180,10 +438,10 @@ const App: React.FC = () => {
         shift.vtr = 'GSE';
       }
     }
-
-    const updatedRoster = { ...roster, days: newDays };
-    setRoster(updatedRoster);
-    setRosters(prev => ({ ...prev, [updatedRoster.id]: updatedRoster }));
+    newDays[dayIdx] = day;
+    
+    const updated = { ...targetRoster, days: newDays };
+    saveRoster(updated);
   };
 
   const [editingCell, setEditingCell] = useState<{ dayIdx: number, rowId: string } | null>(null);
@@ -256,34 +514,82 @@ const App: React.FC = () => {
     }
   }, [selectedWeek, selectedMonth, selectedYear, officers, rosters]);
 
-  // Auto-fill GSE based on Roster
+  // Auto-fill GSE and Justify from Roster and Logbook
   useEffect(() => {
-    if (!roster) return;
     const newGse: GseEntry[] = [];
     const newJustify: GseJustifyEntry[] = [];
 
-    roster.days.forEach(day => {
-      Object.entries(day.shifts).forEach(([rowId, shift]: [string, ShiftEntry]) => {
-        if (shift.type === 'SERVICO' && (rowId === 'BH' || shift.vtr?.includes('GSE'))) {
-          const entryId = `gse-${day.date}-${rowId}`;
-          newGse.push({
-            id: entryId,
-            date: day.date,
-            time: shift.timeRange || '00h às 00h',
-            extra: rowId === 'BH' ? '2' : '12',
-            meIds: shift.officers,
-            mission: shift.mission || 'PATRULHAMENTO'
+    // 1. Collect from all rosters of the month
+    (Object.values(rosters || {}) as RosterState[]).forEach(r => {
+      if (!r || !r.id || !r.id.includes(selectedMonth)) return;
+      (r.days || []).forEach(day => {
+        Object.entries(day.shifts || {}).forEach(([rowId, entries]: [string, ShiftEntry[]]) => {
+          (entries || []).forEach(shift => {
+            if (shift.type === 'SERVICO' && (rowId === 'BH' || shift.vtr?.includes('GSE') || rowId === 'GSE')) {
+              const dateStr = day.date;
+              const existing = newGse.find(g => g.date === dateStr);
+              if (existing) {
+                shift.officers.forEach(id => {
+                  if (!existing.meIds.includes(id)) existing.meIds.push(id);
+                });
+              } else {
+                newGse.push({
+                  id: `gse-${day.date}-${rowId}-${shift.id}`,
+                  date: day.date,
+                  time: shift.timeRange || '17H ÀS 05H',
+                  extra: rowId === 'BH' ? '2' : '12',
+                  meIds: [...shift.officers],
+                  mission: shift.mission || 'PATRULHAMENTO TÁTICO MOTORIZADO'
+                });
+              }
+            }
           });
+        });
+      });
+    });
 
-          shift.officers.forEach(offId => {
-            newJustify.push({
-              id: `justify-${offId}-${day.date}`,
-              officerId: offId,
-              date: day.date,
-              he: rowId === 'BH' ? '2' : '12',
-              turno: rowId,
-              funcao: 'PATRULHEIRO'
-            });
+    // 2. Collect from Logbook Overrides (GSE row)
+    Object.entries(logOverrides || {}).forEach(([key, val]) => {
+      if (!val || val === '' || val === 'FG') return;
+      const [offId, dayStr, type] = key.split('-');
+      if (type === 'GSE') {
+        const day = parseInt(dayStr);
+        const dateStr = `${day.toString().padStart(2, '0')}/${(MONTHS_OF_YEAR.indexOf(selectedMonth) + 1).toString().padStart(2, '0')}/${selectedYear}`;
+        const existing = newGse.find(g => g.date === dateStr);
+        if (existing) {
+          if (!existing.meIds.includes(offId)) existing.meIds.push(offId);
+        } else {
+          newGse.push({
+            id: `gse-log-${day}-${offId}`,
+            date: dateStr,
+            time: '17H ÀS 05H',
+            extra: '12H',
+            meIds: [offId],
+            mission: 'PATRULHAMENTO TÁTICO MOTORIZADO'
+          });
+        }
+      }
+    });
+
+    // Sort by date
+    newGse.sort((a, b) => {
+      const dayA = parseInt(a.date.split('/')[0]);
+      const dayB = parseInt(b.date.split('/')[0]);
+      return dayA - dayB;
+    });
+
+    // Populate Justify
+    newGse.forEach(g => {
+      g.meIds.forEach(meId => {
+        const off = officers.find(o => o.id === meId);
+        if (off) {
+          newJustify.push({
+            id: `justify-${meId}-${g.date}`,
+            officerId: meId,
+            date: g.date,
+            he: g.extra,
+            turno: 'GSE',
+            funcao: 'PATRULHEIRO'
           });
         }
       });
@@ -291,7 +597,7 @@ const App: React.FC = () => {
 
     setGseEntries(newGse);
     setJustifyEntries(newJustify);
-  }, [roster]);
+  }, [rosters, logOverrides, selectedMonth, selectedYear, officers]);
 
   const handleScanByTab = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -333,6 +639,87 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 font-mono">
+        <div className="text-xl font-black uppercase animate-pulse">Carregando Sistema...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-mono">
+        <div className="bg-white border-4 border-black p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md w-full">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-black uppercase leading-none mb-2">Gestor FT</h1>
+            <p className="text-xs font-bold text-slate-500 uppercase">5º Batalhão de Polícia Militar</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-black uppercase mb-1">Usuário</label>
+              <input 
+                type="text" 
+                value={loginUser}
+                onChange={e => setLoginUser(e.target.value)}
+                className="w-full border-2 border-black p-2 text-sm font-bold outline-none"
+                placeholder="admin"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-black uppercase mb-1">Senha</label>
+              <input 
+                type="password" 
+                value={loginPass}
+                onChange={e => setLoginPass(e.target.value)}
+                className="w-full border-2 border-black p-2 text-sm font-bold outline-none"
+                placeholder="••••••••"
+              />
+            </div>
+            
+            {loginError && <p className="text-red-600 text-[10px] font-black uppercase">{loginError}</p>}
+
+            <button 
+              onClick={async () => {
+                setLoginError('');
+                if (loginUser === 'admin' && loginPass === 'admin123') {
+                  const mockUser = { displayName: 'Administrador', username: loginUser, photoURL: 'https://picsum.photos/seed/admin/200' };
+                  setUser(mockUser);
+                  localStorage.setItem('gestor_user', JSON.stringify(mockUser));
+                } else {
+                  setLoginError('Falha no login. Verifique as credenciais.');
+                }
+              }}
+              className="w-full bg-black text-white p-4 font-black uppercase hover:bg-slate-800 transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)]"
+            >
+              Entrar no Sistema
+            </button>
+
+            <div className="relative py-4">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t-2 border-black/10"></div></div>
+              <div className="relative flex justify-center text-[8px] font-black uppercase"><span className="bg-white px-2 text-slate-400">Ou use Google</span></div>
+            </div>
+
+            <button 
+              onClick={() => {
+                const mockUser = { displayName: 'Administrador', username: 'admin', photoURL: 'https://picsum.photos/seed/admin/200' };
+                setUser(mockUser);
+                localStorage.setItem('gestor_user', JSON.stringify(mockUser));
+              }}
+              className="w-full border-2 border-black text-black p-3 font-black uppercase flex items-center justify-center gap-3 hover:bg-slate-50 transition-all"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12.48 10.92v3.28h7.84c-.24 1.84-2.16 5.44-7.84 5.44-4.88 0-8.88-4.04-8.88-9s4-9 8.88-9c2.8 0 4.68 1.16 5.76 2.2l2.56-2.48C19.04 1.32 16.04 0 12.48 0 5.84 0 .48 5.36.48 12s5.36 12 12 12c6.96 0 11.6-4.88 11.6-11.8 0-.8-.08-1.4-.2-2.08h-11.4z"/>
+              </svg>
+              Login Rápido
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-black font-mono pb-24">
       <Header />
@@ -341,6 +728,16 @@ const App: React.FC = () => {
         <div className="container mx-auto px-4 py-2 flex flex-col gap-2">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 mr-4">
+                <img src={user.photoURL || ''} alt="" className="w-8 h-8 rounded-full border-2 border-black" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black uppercase leading-none">{user.displayName}</span>
+                  <button onClick={() => {
+                    setUser(null);
+                    localStorage.removeItem('gestor_user');
+                  }} className="text-[7px] font-bold text-red-600 uppercase text-left hover:underline">Sair</button>
+                </div>
+              </div>
               <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="text-[11px] font-black border-2 border-black p-1 bg-white uppercase">
                 {MONTHS_OF_YEAR.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
@@ -351,6 +748,13 @@ const App: React.FC = () => {
                   </button>
                 ))}
               </nav>
+              <div className="flex border-2 border-black rounded overflow-hidden">
+                {['1', '2', '3', '4', '5'].map(w => (
+                  <button key={w} onClick={() => setSelectedWeek(w)} className={`w-8 h-8 flex items-center justify-center text-[10px] font-black transition-all ${selectedWeek === w ? 'bg-black text-white' : 'bg-white hover:bg-slate-100 border-r border-black last:border-0'}`}>
+                    {w}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowConfig(true)} className="p-2 border-2 border-black bg-white hover:bg-slate-100 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
@@ -362,19 +766,32 @@ const App: React.FC = () => {
               <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 text-[10px] font-black border-2 border-black bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-black hover:text-white transition-all">
                  {isScanning ? 'LENDO...' : 'IA VISION'}
               </button>
-              <button onClick={() => window.print()} className="px-4 py-2 text-[10px] font-black border-2 border-black bg-black text-white">IMPRIMIR</button>
+              <button 
+                onClick={() => {
+                  window.focus();
+                  window.print();
+                }} 
+                className="px-4 py-2 text-[10px] font-black border-2 border-black bg-black text-white hover:bg-slate-800 transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)]"
+              >
+                IMPRIMIR
+              </button>
             </div>
           </div>
           
-          <div className="flex items-center gap-2 bg-slate-50 border-2 border-black p-1">
-            <svg className="w-4 h-4 ml-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            <input 
-              type="text" 
-              placeholder="BUSCAR POLICIAL POR NOME OU ID FUNC..." 
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="flex-grow bg-transparent text-[10px] font-black uppercase p-1 outline-none"
-            />
+          <div className="flex items-center justify-between gap-2 bg-slate-50 border-2 border-black p-1">
+            <div className="flex items-center flex-grow">
+              <svg className="w-4 h-4 ml-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              <input 
+                type="text" 
+                placeholder="BUSCAR POLICIAL POR NOME OU ID FUNC..." 
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="flex-grow bg-transparent text-[10px] font-black uppercase p-1 outline-none"
+              />
+            </div>
+            <div className="text-[8px] font-bold text-slate-400 uppercase mr-2 print:hidden">
+              Dica: Se a impressão não abrir, use Ctrl+P ou abra em nova aba
+            </div>
           </div>
         </div>
       </div>
@@ -414,10 +831,10 @@ const App: React.FC = () => {
                       <td className="p-1 border-r-[3px] border-black font-black text-center text-[10px] bg-slate-50 uppercase italic leading-tight">
                         {def.label}
                       </td>
-                      {roster.days.map((day, dIdx) => (
+                      {roster?.days.map((day, dIdx) => (
                         <td key={dIdx} className={`p-1 align-top border-r-[3px] border-black min-h-[45px] ${isWeekend(day.weekday) ? 'bg-red-50/50' : ''}`}>
                           <ShiftCell 
-                            entry={day.shifts[def.id] || { id: Math.random().toString(), officers: [], type: 'SERVICO' }} 
+                            entries={day.shifts?.[def.id] || []} 
                             officersList={officers}
                             config={config}
                             onClick={() => isEditingScale && setEditingCell({ dayIdx: dIdx, rowId: def.id })}
@@ -473,9 +890,17 @@ const App: React.FC = () => {
               <div className="w-3/4 bg-white p-4 border-4 border-black shadow-lg">
                 <div className="flex justify-between items-center mb-3 border-b-2 border-black pb-1">
                   <h3 className="text-[10px] font-black uppercase italic">Situação do efetivo</h3>
-                  <button onClick={() => setIsEditingStaff(!isEditingStaff)} className="text-[9px] font-black border-2 border-black px-3 py-1 uppercase hover:bg-black hover:text-white transition-all">
-                    {isEditingStaff ? 'Salvar Efetivo' : 'Editar Efetivo'}
-                  </button>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setEditingOfficer({ id: Math.random().toString(), name: '', rank: 'SD', status: 'DISPONIVEL', fullName: '', idFunc: '', credor: '', cpf: '' })} 
+                      className="text-[9px] font-black border-2 border-black px-3 py-1 uppercase hover:bg-black hover:text-white transition-all"
+                    >
+                      + Novo Militar
+                    </button>
+                    <button onClick={() => setIsEditingStaff(!isEditingStaff)} className="text-[9px] font-black border-2 border-black px-3 py-1 uppercase hover:bg-black hover:text-white transition-all">
+                      {isEditingStaff ? 'Concluir' : 'Editar Efetivo'}
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {officers.map(off => (
@@ -502,8 +927,8 @@ const App: React.FC = () => {
             meta={autoMeta as any}
           />
         )}
-        {activeTab === 'GSE_SCALE' && <GseScaleView month={selectedMonth} officers={officers} entries={gseEntries} onUpdate={setGseEntries} meta={autoMeta as any} isEditing={isEditingScale} />}
-        {activeTab === 'GSE_JUSTIFY' && <GseJustifyView month={selectedMonth} officers={officers} entries={justifyEntries} onUpdate={setJustifyEntries} meta={autoMeta as any} isEditing={isEditingScale} />}
+        {activeTab === 'GSE_SCALE' && <GseScaleView month={selectedMonth} officers={officers} entries={gseEntries} onUpdate={saveGseEntries} meta={autoMeta as any} isEditing={isEditingScale} />}
+        {activeTab === 'GSE_JUSTIFY' && <GseJustifyView month={selectedMonth} officers={officers} entries={justifyEntries} onUpdate={saveJustifyEntries} meta={autoMeta as any} isEditing={isEditingScale} />}
       </main>
 
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleScanByTab} />
@@ -519,13 +944,51 @@ const App: React.FC = () => {
 
       {editingCell && roster && (
         <ShiftModal 
-          entry={roster.days[editingCell.dayIdx].shifts[editingCell.rowId] || { id: '', officers: [], type: 'SERVICO' }} 
+          entries={roster.days[editingCell.dayIdx].shifts[editingCell.rowId] || []} 
           officersList={filteredOfficers} 
-          onSave={(entry) => updateShift(editingCell.dayIdx, editingCell.rowId, entry)} 
+          onSave={(entries) => {
+            if (!roster) return;
+            const newDays = [...roster.days];
+            newDays[editingCell.dayIdx].shifts[editingCell.rowId] = entries;
+            const updatedRoster = { ...roster, days: newDays };
+            setRoster(updatedRoster);
+            saveRoster(updatedRoster);
+            setEditingCell(null);
+          }} 
+          onUpdateEntry={(entry, originalId) => updateShift(editingCell.dayIdx, editingCell.rowId, entry, originalId)}
+          onDuplicate={(entry) => duplicateShift(editingCell.dayIdx, editingCell.rowId, entry)}
           onClose={() => setEditingCell(null)} 
         />
       )}
-      {editingOfficer && <OfficerModal officer={editingOfficer} onSave={off => { setOfficers(officers.map(o => o.id === off.id ? off : o)); setEditingOfficer(null); }} onClose={() => setEditingOfficer(null)} />}
+      {editingOfficer && (
+        <OfficerModal 
+          officer={editingOfficer} 
+          onSave={off => { 
+            if (officers.find(o => o.id === off.id)) {
+              saveOfficer(off); 
+            } else {
+              addOfficer(off);
+            }
+            setEditingOfficer(null); 
+          }} 
+          onDelete={id => {
+            deleteOfficer(id);
+            setEditingOfficer(null);
+          }}
+          onClose={() => setEditingOfficer(null)} 
+        />
+      )}
+      
+      {roster && (
+        <AiAssistant 
+          officers={officers} 
+          roster={roster} 
+          onUpdateRoster={(updated) => {
+            setRoster(updated);
+            saveRoster(updated);
+          }} 
+        />
+      )}
     </div>
   );
 };

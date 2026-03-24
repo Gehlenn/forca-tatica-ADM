@@ -3,7 +3,7 @@ import React from 'react';
 
 const Header: React.FC = () => {
   return (
-    <header className="bg-black text-white p-6 shadow-2xl border-b-4 border-slate-800 print:bg-white print:text-black print:border-black">
+    <header className="bg-black text-white p-6 shadow-2xl border-b-4 border-slate-800 print:hidden">
       <div className="container mx-auto flex items-center gap-8">
         {/* Logo da Força Tática - Lado Esquerdo */}
         <div className="flex-shrink-0">
